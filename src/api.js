@@ -18,6 +18,11 @@ export const getUsinas = () => req(`/usinas`);
 export const getUcs = () => req(`/ucs`);
 export const getChamados = () => req(`/chamados`);
 export const getTarifas = () => req(`/tarifas`);
+export const getRateio = (competencia) => req(`/rateio?competencia=${competencia}`);
+export const getGeracao = () => req(`/geracao`);
+export const getCapturasPendentes = (competencia) => req(`/capturas-pendentes?competencia=${competencia}`);
+export const getInadimplencia = () => req(`/inadimplencia`);
+export const getAuditorias = (usinaId) => req(`/usinas/${usinaId}/auditorias`);
 export const postRecalcular = (competencia) => req(`/recalcular?competencia=${competencia}`, { method: "POST" });
 export const postImportar = (file) => {
   const form = new FormData();

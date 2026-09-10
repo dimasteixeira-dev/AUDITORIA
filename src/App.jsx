@@ -255,7 +255,8 @@ function ChamadoPill({ status }) {
 }
 function SinalTag({ texto }) {
   if (texto === "OK") return <Pill tone="verde">OK</Pill>;
-  return <Pill tone={texto.startsWith("Retirar") ? "vermelho" : "ambar"}>{texto}</Pill>;
+  const t = texto.toUpperCase();
+  return <Pill tone={t.includes("RETIRAR") ? "vermelho" : "ambar"}>{texto}</Pill>;
 }
 function Th({ children }) { return <th className="py-2.5 px-4 font-normal whitespace-nowrap">{children}</th>; }
 function Td({ children, className = "" }) { return <td className={`py-3 px-4 ${className}`}>{children}</td>; }
@@ -554,52 +555,61 @@ function UCDetailView({ ucId, ucsMeta, onBack }) {
 }
 
 // ================= RATEIO =================
-function RateioView() {
-  const saldoAlto = UCS.filter((uc) => uc.autonomiaMeses > PARAMS.autonomiaMaximaMeses);
-  const alteracaoConsumo = UCS.filter((uc) => ucConsumoAlerta(uc) !== "OK");
-  const inadimplentes = UCS.filter((uc) => uc.diasVencido > PARAMS.inadimplenciaCriticaDias);
+function RateioView({ competencia }) {
+  const [linhas, setLinhas] = useState(null);
+  const [erro, setErro] = useState(null);
+  useEffect(() => {
+    let cancelado = false;
+    api.getRateio(competencia).then((d) => !cancelado && setLinhas(d)).catch((e) => !cancelado && setErro(e));
+    return () => { cancelado = true; };
+  }, [competencia]);
+
+  if (erro) return <ErrorBlock error={erro} />;
+  if (!linhas) return <LoadingBlock />;
+
+  const saldoAlto = linhas.filter((l) => l.sinal_saldo !== "OK");
+  const alteracaoConsumo = linhas.filter((l) => l.sinal_consumo !== "OK");
+  const inadimplentes = linhas.filter((l) => l.sinal_inadimplencia !== "OK");
+
   return (
     <div className="flex flex-col gap-8">
-      <MockBanner />
       <div>
         <SectionTitle>Rateio — todas as UCs</SectionTitle>
         <Table>
           <thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>Usina</Th><Th>UC</Th><Th>Apelido</Th><Th>Consumo compens.</Th><Th>Saldo</Th><Th>Rateio ideal</Th><Th>Rateio verificado</Th><Th>Autonomia</Th><Th>Sinal. saldo</Th><Th>Sinal. consumo</Th><Th>Sinal. inadimpl.</Th></tr></thead>
-          <tbody>{UCS.map((uc) => {
-            const usina = USINAS.find((u) => u.id === uc.usinaId);
-            return (
-              <tr key={uc.id} className="border-b last:border-0" style={{ borderColor: "#F1F2F4" }}>
-                <Td className="max-w-[180px]">{usina.nome}</Td><Td className="tabular-nums">{uc.numero}</Td><Td>{uc.apelido}</Td>
-                <Td className="tabular-nums">{fmtKwh(uc.consumoCompensavel)}</Td><Td className="tabular-nums">{fmtKwh(uc.saldoKwh)}</Td>
-                <Td className="tabular-nums">{(uc.rateioIdeal * 100).toFixed(1)}%</Td><Td className="tabular-nums">{(uc.rateioVerificado * 100).toFixed(1)}%</Td>
-                <Td className="tabular-nums">{uc.autonomiaMeses.toFixed(1)}m</Td>
-                <Td><SinalTag texto={ucSaldoAlerta(uc)} /></Td><Td><SinalTag texto={ucConsumoAlerta(uc)} /></Td><Td><SinalTag texto={ucInadimplenciaAlerta(uc)} /></Td>
-              </tr>
-            );
-          })}</tbody>
+          <tbody>{linhas.map((l) => (
+            <tr key={l.uc_id} className="border-b last:border-0" style={{ borderColor: "#F1F2F4" }}>
+              <Td className="max-w-[180px]">{l.usina_nome}</Td><Td className="tabular-nums">{l.numero}</Td><Td>{l.apelido}</Td>
+              <Td className="tabular-nums">{fmtKwh(l.consumo_compensavel_kwh)}</Td><Td className="tabular-nums">{fmtKwh(l.saldo_kwh)}</Td>
+              <Td className="tabular-nums">{l.rateio_ideal_pct != null ? `${(l.rateio_ideal_pct * 100).toFixed(1)}%` : "—"}</Td>
+              <Td className="tabular-nums">{l.rateio_verificado_pct != null ? `${(l.rateio_verificado_pct * 100).toFixed(1)}%` : "—"}</Td>
+              <Td className="tabular-nums">{l.autonomia_meses.toFixed(1)}m</Td>
+              <Td><SinalTag texto={l.sinal_saldo} /></Td><Td><SinalTag texto={l.sinal_consumo} /></Td><Td><SinalTag texto={l.sinal_inadimplencia} /></Td>
+            </tr>
+          ))}</tbody>
         </Table>
       </div>
       <div>
         <SectionTitle sub={`${saldoAlto.length} UC(s) sinalizada(s)`}>⚡ Saldo alto — rebalancear (autonomia &gt; {PARAMS.autonomiaMaximaMeses} meses)</SectionTitle>
         {saldoAlto.length === 0 ? <EmptyRow texto="Nenhuma UC com saldo acima do limite." /> : (
           <Table><thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>UC</Th><Th>Apelido</Th><Th>Saldo</Th><Th>Autonomia</Th></tr></thead>
-            <tbody>{saldoAlto.map((uc) => <tr key={uc.id} className="border-b last:border-0" style={{ borderColor: "#F1F2F4" }}><Td className="tabular-nums">{uc.numero}</Td><Td>{uc.apelido}</Td><Td className="tabular-nums">{fmtKwh(uc.saldoKwh)}</Td><Td className="tabular-nums">{uc.autonomiaMeses.toFixed(1)} meses</Td></tr>)}</tbody>
+            <tbody>{saldoAlto.map((l) => <tr key={l.uc_id} className="border-b last:border-0" style={{ borderColor: "#F1F2F4" }}><Td className="tabular-nums">{l.numero}</Td><Td>{l.apelido}</Td><Td className="tabular-nums">{fmtKwh(l.saldo_kwh)}</Td><Td className="tabular-nums">{l.autonomia_meses.toFixed(1)} meses</Td></tr>)}</tbody>
           </Table>
         )}
       </div>
       <div>
         <SectionTitle sub={`${alteracaoConsumo.length} UC(s) sinalizada(s)`}>📊 Alteração de consumo — 3 meses consecutivos</SectionTitle>
         {alteracaoConsumo.length === 0 ? <EmptyRow texto="Nenhuma UC sinalizada." /> : (
-          <Table><thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>UC</Th><Th>Apelido</Th><Th>Créditos N</Th><Th>Créditos N-1</Th><Th>Créditos N-2</Th><Th>Sinalização</Th></tr></thead>
-            <tbody>{alteracaoConsumo.map((uc) => <tr key={uc.id} className="border-b last:border-0" style={{ borderColor: "#F1F2F4" }}><Td className="tabular-nums">{uc.numero}</Td><Td>{uc.apelido}</Td><Td className="tabular-nums">{fmtKwh(uc.creditosN)}</Td><Td className="tabular-nums">{fmtKwh(uc.creditosN1)}</Td><Td className="tabular-nums">{fmtKwh(uc.creditosN2)}</Td><Td><SinalTag texto={ucConsumoAlerta(uc)} /></Td></tr>)}</tbody>
+          <Table><thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>UC</Th><Th>Apelido</Th><Th>Sinalização</Th></tr></thead>
+            <tbody>{alteracaoConsumo.map((l) => <tr key={l.uc_id} className="border-b last:border-0" style={{ borderColor: "#F1F2F4" }}><Td className="tabular-nums">{l.numero}</Td><Td>{l.apelido}</Td><Td><SinalTag texto={l.sinal_consumo} /></Td></tr>)}</tbody>
           </Table>
         )}
       </div>
       <div>
         <SectionTitle sub={`${inadimplentes.length} UC(s) sinalizada(s)`}>🚨 Inadimplência &gt; {PARAMS.inadimplenciaCriticaDias} dias — retirar do rateio</SectionTitle>
         {inadimplentes.length === 0 ? <EmptyRow texto="Nenhuma UC ultrapassou o limite de dias em aberto." /> : (
-          <Table><thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>UC</Th><Th>Apelido</Th><Th>Dias vencido</Th><Th>Valor vencido</Th></tr></thead>
-            <tbody>{inadimplentes.map((uc) => <tr key={uc.id} className="border-b last:border-0" style={{ borderColor: "#F1F2F4" }}><Td className="tabular-nums">{uc.numero}</Td><Td>{uc.apelido}</Td><Td className="tabular-nums">{uc.diasVencido}</Td><Td className="tabular-nums">{fmtR$(uc.valorVencido)}</Td></tr>)}</tbody>
+          <Table><thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>UC</Th><Th>Apelido</Th><Th>Dias vencido</Th></tr></thead>
+            <tbody>{inadimplentes.map((l) => <tr key={l.uc_id} className="border-b last:border-0" style={{ borderColor: "#F1F2F4" }}><Td className="tabular-nums">{l.numero}</Td><Td>{l.apelido}</Td><Td className="tabular-nums">{l.dias_vencido}</Td></tr>)}</tbody>
           </Table>
         )}
       </div>
@@ -609,26 +619,46 @@ function RateioView() {
 
 // ================= GERAÇÃO =================
 function GeracaoView() {
+  const [dados, setDados] = useState(null);
+  const [erro, setErro] = useState(null);
+  useEffect(() => {
+    let cancelado = false;
+    api.getGeracao().then((d) => !cancelado && setDados(d)).catch((e) => !cancelado && setErro(e));
+    return () => { cancelado = true; };
+  }, []);
+
+  if (erro) return <ErrorBlock error={erro} />;
+  if (!dados) return <LoadingBlock />;
+
+  const fmtComp = (iso) => { const [y, mo] = iso.split("-"); return `${mo}/${y}`; };
+
   return (
     <div className="flex flex-col gap-10">
-      <MockBanner />
-      {USINAS.map((u) => {
-        const serie = GERACAO[u.id];
-        const { desvio, tendencia, media } = tendenciaGeracao(serie);
-        const atual = serie[serie.length - 1].injetada;
-        const creditosM1 = CREDITOS_UTILIZADOS_M1[u.id];
-        const flut = serie.map((s, i) => ({ comp: s.comp, geracao: s.injetada, creditos: creditosM1[i] }));
+      {dados.map((u) => {
+        if (u.serie.length === 0) return (
+          <div key={u.usina_id} className="flex flex-col gap-2">
+            <h2 className="text-[15px] text-[#161821]">{u.usina_nome}</h2>
+            <EmptyRow texto="Nenhuma geração importada ainda para esta usina." />
+          </div>
+        );
+        const atual = u.serie[u.serie.length - 1].energia_injetada_kwh;
+        const anteriores = u.serie.slice(0, -1);
+        const media = anteriores.length ? anteriores.reduce((s, x) => s + x.energia_injetada_kwh, 0) / anteriores.length : atual;
+        const desvio = media ? (atual - media) / media : 0;
+        const tendencia = desvio > PARAMS.desvioGeracaoAlertaPct ? "acima" : desvio < -PARAMS.desvioGeracaoAlertaPct ? "abaixo" : "estavel";
+        const serieFmt = u.serie.map((p) => ({ comp: fmtComp(p.competencia), injetada: p.energia_injetada_kwh }));
+        const flut = u.serie.map((p) => ({ comp: fmtComp(p.competencia), geracao: p.energia_injetada_kwh, creditos: p.creditos_utilizados_m1_kwh }));
         return (
-          <div key={u.id} className="flex flex-col gap-4">
+          <div key={u.usina_id} className="flex flex-col gap-4">
             <div className="flex items-baseline justify-between flex-wrap gap-2">
-              <h2 className="text-[15px] text-[#161821]">{u.nome}</h2>
+              <h2 className="text-[15px] text-[#161821]">{u.usina_nome}</h2>
               <div className="flex items-center gap-2 text-[13px]" style={{ color: T.textMuted }}><TrendIcon tendencia={tendencia} /> {fmtKwh(atual)} atual · média {fmtKwh(media)} · desvio {(desvio * 100).toFixed(0)}%</div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="bg-white border rounded-xl px-4 py-4" style={{ borderColor: T.border, height: 220 }}>
                 <p className="text-[12px] mb-2" style={{ color: T.textMuted }}>Energia injetada — histórico</p>
                 <ResponsiveContainer width="100%" height="85%">
-                  <LineChart data={serie}>
+                  <LineChart data={serieFmt}>
                     <CartesianGrid stroke="#F1F2F4" vertical={false} />
                     <XAxis dataKey="comp" tick={{ fontSize: 11, fill: T.textMuted }} axisLine={{ stroke: T.border }} tickLine={false} />
                     <YAxis tick={{ fontSize: 11, fill: T.textMuted }} axisLine={false} tickLine={false} />
@@ -661,17 +691,21 @@ function GeracaoView() {
 }
 
 // ================= FATURAMENTO =================
-function FaturamentoView() {
-  const pendentes = UCS.filter((uc) => !uc.capturada).map((uc) => {
-    const usina = USINAS.find((u) => u.id === uc.usinaId);
-    const tarifa = tarifaRetorno(usina);
-    const perdido = uc.consumoCompensavel * tarifa;
-    return { uc, usina, tarifa, perdido };
-  });
-  const totalPerdido = pendentes.reduce((s, p) => s + p.perdido, 0);
+function FaturamentoView({ competencia }) {
+  const [pendentes, setPendentes] = useState(null);
+  const [erro, setErro] = useState(null);
+  useEffect(() => {
+    let cancelado = false;
+    api.getCapturasPendentes(competencia).then((d) => !cancelado && setPendentes(d)).catch((e) => !cancelado && setErro(e));
+    return () => { cancelado = true; };
+  }, [competencia]);
+
+  if (erro) return <ErrorBlock error={erro} />;
+  if (!pendentes) return <LoadingBlock />;
+  const totalPerdido = pendentes.reduce((s, p) => s + p.faturamento_perdido, 0);
+
   return (
     <div className="flex flex-col gap-6">
-      <MockBanner />
       <div className="grid grid-cols-2 gap-4 max-w-xl">
         <KpiCard label="UCs sem captura" value={pendentes.length} pillLabel={pendentes.length > 0 ? "abrir chamados" : "tudo capturado"} pillTone={pendentes.length > 0 ? "vermelho" : "verde"} />
         <KpiCard label="Faturamento potencial perdido" value={fmtR$(totalPerdido)} pillLabel={totalPerdido > 0 ? "impacto no mês" : "sem perdas"} pillTone={totalPerdido > 0 ? "vermelho" : "verde"} />
@@ -680,11 +714,11 @@ function FaturamentoView() {
       <Table>
         <thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>Usina</Th><Th>UC</Th><Th>Apelido</Th><Th>Consumo médio</Th><Th>Tarifa média de retorno</Th><Th>Faturamento perdido</Th><Th>Ação</Th></tr></thead>
         <tbody>
-          {pendentes.map(({ uc, usina, tarifa, perdido }) => (
-            <tr key={uc.id} className="border-b last:border-0" style={{ borderColor: "#F1F2F4" }}>
-              <Td className="max-w-[180px]">{usina.nome}</Td><Td className="tabular-nums">{uc.numero}</Td><Td>{uc.apelido}</Td>
-              <Td className="tabular-nums">{fmtKwh(uc.consumoCompensavel)}</Td><Td className="tabular-nums">R$ {tarifa.toFixed(4)}/kWh</Td>
-              <Td className="tabular-nums" style={{ color: "#B23A2F" }}>{fmtR$(perdido)}</Td>
+          {pendentes.map((p) => (
+            <tr key={p.uc_id} className="border-b last:border-0" style={{ borderColor: "#F1F2F4" }}>
+              <Td className="max-w-[180px]">{p.usina_nome}</Td><Td className="tabular-nums">{p.numero}</Td><Td>{p.apelido}</Td>
+              <Td className="tabular-nums">{fmtKwh(p.consumo_compensavel_kwh)}</Td><Td className="tabular-nums">R$ {p.tarifa_media_retorno.toFixed(4)}/kWh</Td>
+              <Td className="tabular-nums" style={{ color: "#B23A2F" }}>{fmtR$(p.faturamento_perdido)}</Td>
               <Td><button className="text-[12px] px-2.5 py-1.5 rounded-lg text-white" style={{ background: T.ink }}>Registrar chamado</button></Td>
             </tr>
           ))}
@@ -696,33 +730,40 @@ function FaturamentoView() {
 }
 
 // ================= INADIMPLÊNCIA =================
-function InadimplenciaView() {
-  const vencidas = UCS.filter((uc) => uc.diasVencido > 0);
-  const totalVencido = vencidas.reduce((s, uc) => s + (uc.unificada ? valorRealAPagar(uc) : uc.valorVencido), 0);
+function InadimplenciaView({ ucsMeta }) {
+  const [vencidas, setVencidas] = useState(null);
+  const [erro, setErro] = useState(null);
+  useEffect(() => {
+    let cancelado = false;
+    api.getInadimplencia().then((d) => !cancelado && setVencidas(d)).catch((e) => !cancelado && setErro(e));
+    return () => { cancelado = true; };
+  }, []);
+
+  if (erro) return <ErrorBlock error={erro} />;
+  if (!vencidas) return <LoadingBlock />;
+  const totalVencido = vencidas.reduce((s, f) => s + f.valor_real_a_pagar, 0);
+  const totalUcs = ucsMeta.length || 1;
+
   return (
     <div className="flex flex-col gap-6">
-      <MockBanner />
       <div className="grid grid-cols-3 gap-4 max-w-2xl">
-        <KpiCard label="UCs em atraso" value={vencidas.length} pillLabel={vencidas.length > 0 ? "acompanhar" : "em dia"} pillTone={vencidas.length > 0 ? "vermelho" : "verde"} />
+        <KpiCard label="Faturas em atraso" value={vencidas.length} pillLabel={vencidas.length > 0 ? "acompanhar" : "em dia"} pillTone={vencidas.length > 0 ? "vermelho" : "verde"} />
         <KpiCard label="Total em aberto" value={fmtR$(totalVencido)} />
-        <KpiCard label="% da carteira" value={`${((vencidas.length / UCS.length) * 100).toFixed(0)}%`} />
+        <KpiCard label="% da carteira (UCs)" value={`${((vencidas.length / totalUcs) * 100).toFixed(0)}%`} />
       </div>
       <Table>
-        <thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>Usina</Th><Th>UC</Th><Th>Titular</Th><Th>Unificada</Th><Th>Total Sunne</Th><Th>Total concessionária</Th><Th>Valor real a pagar</Th><Th>Dias vencido</Th><Th>Ação</Th></tr></thead>
+        <thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>Usina</Th><Th>Conta / UC</Th><Th>Titular</Th><Th>Unificada</Th><Th>Total Sunne</Th><Th>Total concessionária</Th><Th>Valor real a pagar</Th><Th>Dias vencido</Th><Th>Ação</Th></tr></thead>
         <tbody>
-          {vencidas.map((uc) => {
-            const usina = USINAS.find((u) => u.id === uc.usinaId);
-            return (
-              <tr key={uc.id} className="border-b last:border-0" style={{ borderColor: "#F1F2F4" }}>
-                <Td className="max-w-[160px]">{usina.nome}</Td><Td className="tabular-nums">{uc.numero}</Td><Td>{uc.titular || uc.apelido}</Td>
-                <Td>{uc.unificada ? "Sim" : "Não"}</Td><Td className="tabular-nums">{fmtR$(uc.totalSunne ?? uc.valorVencido)}</Td>
-                <Td className="tabular-nums">{fmtR$(uc.totalConcessionaria ?? 0)}</Td>
-                <Td className="tabular-nums" style={{ color: "#B23A2F" }}>{fmtR$(uc.unificada ? valorRealAPagar(uc) : uc.valorVencido)}</Td>
-                <Td className="tabular-nums">{uc.diasVencido}{uc.diasVencido > PARAMS.inadimplenciaCriticaDias ? " ⚠" : ""}</Td>
-                <Td><button className="text-[12px] px-2.5 py-1.5 rounded-lg text-white" style={{ background: T.ink }}>Acionar cliente</button></Td>
-              </tr>
-            );
-          })}
+          {vencidas.map((f) => (
+            <tr key={f.fatura_id} className="border-b last:border-0" style={{ borderColor: "#F1F2F4" }}>
+              <Td className="max-w-[160px]">{f.usina_nome}</Td><Td className="tabular-nums">{f.numero_conta}</Td><Td>{f.titular || "—"}</Td>
+              <Td>{f.unificada ? "Sim" : "Não"}</Td><Td className="tabular-nums">{fmtR$(f.total_sunne)}</Td>
+              <Td className="tabular-nums">{fmtR$(f.total_concessionaria)}</Td>
+              <Td className="tabular-nums" style={{ color: "#B23A2F" }}>{fmtR$(f.valor_real_a_pagar)}</Td>
+              <Td className="tabular-nums">{f.dias_vencido ?? "—"}{f.dias_vencido > PARAMS.inadimplenciaCriticaDias ? " ⚠" : ""}</Td>
+              <Td><button className="text-[12px] px-2.5 py-1.5 rounded-lg text-white" style={{ background: T.ink }}>Acionar cliente</button></Td>
+            </tr>
+          ))}
           {vencidas.length === 0 && <tr><Td className="text-center" style={{ color: T.textMuted }}>Nenhuma fatura vencida na carteira.</Td></tr>}
         </tbody>
       </Table>
@@ -778,31 +819,60 @@ function ChamadosView({ chamados }) {
 }
 
 // ================= AUDITORIAS =================
-function AuditoriasView() {
+function AuditoriasView({ usinasMeta }) {
+  const [usinaId, setUsinaId] = useState(usinasMeta[0]?.id ?? null);
+  const [pontos, setPontos] = useState(null);
+  const [erro, setErro] = useState(null);
+
+  useEffect(() => {
+    if (usinasMeta.length && usinaId === null) setUsinaId(usinasMeta[0].id);
+  }, [usinasMeta]);
+
+  useEffect(() => {
+    if (usinaId === null) return;
+    let cancelado = false;
+    setPontos(null);
+    api.getAuditorias(usinaId).then((d) => !cancelado && setPontos(d)).catch((e) => !cancelado && setErro(e));
+    return () => { cancelado = true; };
+  }, [usinaId]);
+
+  const fmtComp = (iso) => { const [y, mo] = iso.split("-"); return `${mo}/${y}`; };
+
+  if (!usinasMeta.length) return <EmptyRow texto="Nenhuma usina importada ainda." />;
   return (
     <div className="flex flex-col gap-6">
-      <MockBanner />
-      <SectionTitle sub="Snapshot mensal da usina AAMN – UFV 1, competência a competência (dados reais em 07/2026)">Auditorias — evolução mensal</SectionTitle>
-      <div className="bg-white border rounded-xl px-4 py-4" style={{ borderColor: T.border, height: 240 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={AUDITORIAS_U1}>
-            <CartesianGrid stroke="#F1F2F4" vertical={false} />
-            <XAxis dataKey="comp" tick={{ fontSize: 12, fill: T.textMuted }} axisLine={{ stroke: T.border }} tickLine={false} />
-            <YAxis tick={{ fontSize: 12, fill: T.textMuted }} axisLine={false} tickLine={false} domain={[0, 100]} />
-            <Tooltip />
-            <Line type="monotone" dataKey="healthScore" stroke={T.accent} strokeWidth={2} dot={{ r: 3 }} name="Health Score" />
-          </LineChart>
-        </ResponsiveContainer>
+      <div className="flex items-center gap-3">
+        <span className="text-[13px]" style={{ color: T.textMuted }}>Usina</span>
+        <Select value={String(usinaId)} onChange={(v) => setUsinaId(Number(v))} options={usinasMeta.map((u) => ({ value: String(u.id), label: u.nome }))} />
       </div>
-      <Table>
-        <thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>Competência</Th><Th>Health score</Th><Th>Status</Th><Th>Eficiência</Th><Th>Vacância</Th><Th>Capturas pend.</Th></tr></thead>
-        <tbody>{AUDITORIAS_U1.map((a) => (
-          <tr key={a.comp} className="border-b last:border-0" style={{ borderColor: "#F1F2F4" }}>
-            <Td>{a.comp}</Td><Td className="tabular-nums">{a.healthScore}</Td><Td><StatusPill status={a.status} /></Td>
-            <Td className="tabular-nums">{(a.eficiencia * 100).toFixed(0)}%</Td><Td className="tabular-nums">{(a.vacancia * 100).toFixed(0)}%</Td><Td className="tabular-nums">{a.capturasPendentes}</Td>
-          </tr>
-        ))}</tbody>
-      </Table>
+      <SectionTitle sub="Snapshot mensal calculado a partir do histórico de geração importado">Auditorias — evolução mensal</SectionTitle>
+      {erro && <ErrorBlock error={erro} />}
+      {!erro && !pontos && <LoadingBlock />}
+      {pontos && pontos.length === 0 && <EmptyRow texto="Sem histórico suficiente (nenhuma geração importada para esta usina)." />}
+      {pontos && pontos.length > 0 && (
+        <>
+          <div className="bg-white border rounded-xl px-4 py-4" style={{ borderColor: T.border, height: 240 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={pontos.map((p) => ({ comp: fmtComp(p.competencia), healthScore: p.health_score }))}>
+                <CartesianGrid stroke="#F1F2F4" vertical={false} />
+                <XAxis dataKey="comp" tick={{ fontSize: 12, fill: T.textMuted }} axisLine={{ stroke: T.border }} tickLine={false} />
+                <YAxis tick={{ fontSize: 12, fill: T.textMuted }} axisLine={false} tickLine={false} domain={[0, 100]} />
+                <Tooltip />
+                <Line type="monotone" dataKey="healthScore" stroke={T.accent} strokeWidth={2} dot={{ r: 3 }} name="Health Score" />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+          <Table>
+            <thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>Competência</Th><Th>Health score</Th><Th>Status</Th><Th>Eficiência</Th><Th>Vacância</Th><Th>Capturas pend.</Th></tr></thead>
+            <tbody>{pontos.map((a) => (
+              <tr key={a.competencia} className="border-b last:border-0" style={{ borderColor: "#F1F2F4" }}>
+                <Td>{fmtComp(a.competencia)}</Td><Td className="tabular-nums">{a.health_score}</Td><Td><StatusPill status={a.status} /></Td>
+                <Td className="tabular-nums">{(a.eficiencia_rateio * 100).toFixed(0)}%</Td><Td className="tabular-nums">{(a.vacancia * 100).toFixed(0)}%</Td><Td className="tabular-nums">{a.capturas_pendentes}</Td>
+              </tr>
+            ))}</tbody>
+          </Table>
+        </>
+      )}
     </div>
   );
 }
@@ -811,7 +881,9 @@ function AuditoriasView() {
 function HistoricoView() {
   return (
     <div className="flex flex-col gap-3">
-      <MockBanner />
+      <div className="flex items-center gap-2 text-[12.5px] px-4 py-2.5 rounded-lg" style={{ background: "#EAF1F6", color: "#294C61" }}>
+        <AlertTriangle size={13} /> Esta tela depende de um recurso que ainda não existe: marcar um alerta como "Resolvido" (com responsável, data e observação). Assim que esse fluxo existir, o Histórico passa a listar os alertas realmente resolvidos, em vez de dados de exemplo.
+      </div>
       <SectionTitle sub="Linha do tempo consolidada — alertas resolvidos, auditorias e chamados encerrados">Histórico</SectionTitle>
       {HISTORICO.map((h, i) => (
         <div key={i} className="flex gap-4 bg-white border rounded-xl px-5 py-4" style={{ borderColor: T.border }}>
@@ -948,13 +1020,13 @@ export default function App() {
   else if (tab === "alertas") content = <AlertasView alerts={alerts} usinasMeta={usinasMeta} ucsMeta={ucsMeta} />;
   else if (tab === "usinas") content = openUsina ? <UsinaDetailView usinaId={openUsina} usinasMeta={usinasMeta} indicadores={dashboard.usinas} ucsMeta={ucsMeta} onBack={() => setOpenUsina(null)} /> : <UsinasListView usinasMeta={usinasMeta} onOpen={setOpenUsina} />;
   else if (tab === "ucs") content = openUC ? <UCDetailView ucId={openUC} ucsMeta={ucsMeta} onBack={() => setOpenUC(null)} /> : <UCsListView ucsMeta={ucsMeta} onOpen={setOpenUC} />;
-  else if (tab === "rateio") content = <RateioView />;
+  else if (tab === "rateio") content = <RateioView competencia={competencia} />;
   else if (tab === "geracao") content = <GeracaoView />;
-  else if (tab === "faturamento") content = <FaturamentoView />;
-  else if (tab === "inadimplencia") content = <InadimplenciaView />;
+  else if (tab === "faturamento") content = <FaturamentoView competencia={competencia} />;
+  else if (tab === "inadimplencia") content = <InadimplenciaView ucsMeta={ucsMeta} />;
   else if (tab === "tarifas") content = <TarifasView tarifas={tarifas} />;
   else if (tab === "chamados") content = <ChamadosView chamados={chamados} />;
-  else if (tab === "auditorias") content = <AuditoriasView />;
+  else if (tab === "auditorias") content = <AuditoriasView usinasMeta={usinasMeta} />;
   else if (tab === "historico") content = <HistoricoView />;
   else if (tab === "importacao") content = <ImportacaoView competencia={competencia} onImported={() => setReloadKey((k) => k + 1)} />;
 
