@@ -1,13 +1,14 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   LayoutGrid, ListChecks, Bell, Factory, Users, SplitSquareHorizontal,
   Activity, ChevronLeft, Filter, ArrowUpRight, ArrowDownRight, Minus,
-  Receipt, AlertCircle, Tag, PhoneCall, History, ClipboardCheck, UploadCloud, CheckCircle2, Download
+  Receipt, AlertCircle, Tag, PhoneCall, History, ClipboardCheck, UploadCloud, CheckCircle2, Download, Loader2, AlertTriangle
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, Legend,
 } from "recharts";
+import * as api from "./api.js";
 
 /* ────────────────────────────────────────────────────────────────────────
    Plataforma de Auditoria — visual alinhado ao design system interno
@@ -281,57 +282,67 @@ function Select({ value, onChange, options }) {
     </select>
   );
 }
+function MockBanner({ children }) {
+  return (
+    <div className="flex items-center gap-2 text-[12.5px] px-4 py-2.5 rounded-lg" style={{ background: "#FBEAD3", color: "#8A501C" }}>
+      <AlertTriangle size={13} /> {children || "Esta tela ainda mostra dados de exemplo — a conexão com o backend real chega numa próxima etapa."}
+    </div>
+  );
+}
+function LoadingBlock() {
+  return <div className="flex items-center gap-2 text-[13px] py-10 justify-center" style={{ color: T.textMuted }}><Loader2 size={16} className="animate-spin" /> Carregando dados reais do backend...</div>;
+}
+function ErrorBlock({ error, onRetry }) {
+  return (
+    <div className="flex flex-col items-center gap-3 text-[13px] py-10 text-center" style={{ color: "#B23A2F" }}>
+      <AlertTriangle size={18} />
+      <p>Não consegui falar com o backend.<br />{String(error?.message || error)}</p>
+      <p className="text-[12px]" style={{ color: T.textMuted }}>
+        Se o backend está no Render, a primeira chamada pode levar 30-50s para "acordar" — tente de novo em instantes.
+      </p>
+      {onRetry && <button onClick={onRetry} className="text-[12px] px-3 py-1.5 rounded-lg text-white" style={{ background: T.ink }}>Tentar de novo</button>}
+    </div>
+  );
+}
 
 // ================= DASHBOARD (estilo "Placar") =================
-function DashboardView({ rows, onOpenUsina }) {
+function DashboardView({ dashboard, usinasMeta, competencia, onChangeCompetencia, onOpenUsina }) {
   const [usinaFiltro, setUsinaFiltro] = useState("todas");
-  const [regime, setRegime] = useState("competencia");
-  const linhas = usinaFiltro === "todas" ? rows : rows.filter((r) => r.u.id === usinaFiltro);
+  const linhas = usinaFiltro === "todas" ? dashboard.usinas : dashboard.usinas.filter((r) => r.usina_id === Number(usinaFiltro));
+  const metaById = useMemo(() => Object.fromEntries(usinasMeta.map((u) => [u.id, u])), [usinasMeta]);
 
   const totals = useMemo(() => {
-    const fatPotencial = linhas.reduce((s, r) => s + r.u.faturamentoPotencial, 0);
-    const mrrReal = linhas.reduce((s, r) => s + r.u.mrrRealizado, 0);
-    const inad = linhas.reduce((s, r) => s + r.u.inadimplenciaMes, 0);
-    const capturas = linhas.reduce((s, r) => s + r.u.capturasPendentes, 0);
-    const chamadosAbertos = CHAMADOS_SEED.filter((c) => (c.status === "Aberto" || c.status === "Em andamento") && (usinaFiltro === "todas" || c.usinaId === usinaFiltro)).length;
-    const potenciaMWp = linhas.reduce((s, r) => s + r.u.potenciaMWp, 0);
-    return { fatPotencial, mrrReal, gap: mrrReal - fatPotencial, inad, capturas, chamadosAbertos, potenciaMWp };
-  }, [linhas, usinaFiltro]);
+    const fatPotencial = linhas.reduce((s, r) => s + r.faturamento_potencial, 0);
+    const mrrReal = linhas.reduce((s, r) => s + r.mrr_realizado, 0);
+    const inad = linhas.reduce((s, r) => s + r.inadimplencia_mes, 0);
+    const capturas = linhas.reduce((s, r) => s + r.capturas_pendentes, 0);
+    const chamadosAbertos = linhas.reduce((s, r) => s + r.chamados_abertos, 0);
+    return { fatPotencial, mrrReal, gap: mrrReal - fatPotencial, inad, capturas, chamadosAbertos };
+  }, [linhas]);
 
   const pctRealizado = totals.fatPotencial ? totals.mrrReal / totals.fatPotencial : 0;
-  const hero = usinaFiltro === "todas" ? null : USINAS.find((u) => u.id === usinaFiltro);
+  const heroMeta = usinaFiltro === "todas" ? null : metaById[Number(usinaFiltro)];
+  const heroInd = usinaFiltro === "todas" ? null : dashboard.usinas.find((r) => r.usina_id === Number(usinaFiltro));
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center gap-3 flex-wrap">
         <span className="text-[13px]" style={{ color: T.textMuted }}>Usina</span>
         <Select value={usinaFiltro} onChange={setUsinaFiltro}
-          options={[{ value: "todas", label: `Todas · ${USINAS.length} usinas · ${USINAS.reduce((s, u) => s + u.potenciaMWp, 0).toFixed(1)} MWp` }, ...USINAS.map((u) => ({ value: u.id, label: u.nome }))]} />
+          options={[{ value: "todas", label: `Todas · ${usinasMeta.length} usina(s)` }, ...usinasMeta.map((u) => ({ value: String(u.id), label: u.nome }))]} />
         <span className="text-[13px] ml-4" style={{ color: T.textMuted }}>Competência</span>
-        <Select value="07/2026" onChange={() => {}} options={[{ value: "07/2026", label: "Jul/2026" }]} />
-        <div className="flex bg-white border rounded-lg overflow-hidden ml-2" style={{ borderColor: T.border }}>
-          {[["competencia", "Competência"], ["caixa", "Caixa"]].map(([val, label]) => (
-            <button key={val} onClick={() => setRegime(val)} className="text-[13px] px-4 py-2"
-              style={{ background: regime === val ? T.ink : "transparent", color: regime === val ? "#fff" : T.textMuted }}>
-              {label}
-            </button>
-          ))}
-        </div>
+        <input type="month" value={competencia.slice(0, 7)} onChange={(e) => onChangeCompetencia(`${e.target.value}-01`)}
+          className="text-[13px] border rounded-lg px-3 py-2 bg-white" style={{ borderColor: T.border }} />
       </div>
 
-      {hero && (
+      {heroMeta && heroInd && (
         <div className="bg-white rounded-xl px-6 py-5 flex items-start justify-between flex-wrap gap-4" style={{ borderLeft: `4px solid ${T.accent}`, boxShadow: "0 1px 2px rgba(20,20,20,.04)" }}>
           <div>
             <p className="text-[11px] tracking-wide" style={{ color: T.textMuted }}>PLACAR DA USINA</p>
-            <h2 className="text-[19px] text-[#161821] mt-1">{hero.nome}</h2>
-            <p className="text-[13px] mt-1" style={{ color: T.textMuted }}>{hero.distribuidora} · {hero.potenciaMWp} MWp · GD{hero.gd} · em operação desde {hero.emOperacaoDesde}</p>
+            <h2 className="text-[19px] text-[#161821] mt-1">{heroMeta.nome}</h2>
+            <p className="text-[13px] mt-1" style={{ color: T.textMuted }}>{heroMeta.distribuidora} · GD{heroMeta.gd} · {heroMeta.modalidade}</p>
           </div>
-          <div className="flex items-center gap-3">
-            <Pill tone="verde">Em operação</Pill>
-            <button className="flex items-center gap-1.5 text-[13px] border rounded-lg px-3 py-2" style={{ borderColor: T.border }}>
-              <Download size={14} /> Baixar placar (PDF)
-            </button>
-          </div>
+          <StatusPill status={heroInd.status} />
         </div>
       )}
 
@@ -339,9 +350,9 @@ function DashboardView({ rows, onOpenUsina }) {
         <SectionTitle>Esperado × realizado</SectionTitle>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           <KpiCard label="Faturamento potencial" value={fmtR$(totals.fatPotencial)}
-            sub={`Regime de ${regime === "competencia" ? "competência" : "caixa"} · energia injetada do mês anterior`}
+            sub="Tarifa líquida × energia injetada do mês anterior"
             pillLabel={`${(pctRealizado * 100).toFixed(0)}% realizado`} pillTone={pctRealizado >= 0.95 ? "verde" : "ambar"} />
-          <KpiCard label="MRR realizado" value={fmtR$(totals.mrrReal)} sub="Total pago no mês × % de administração"
+          <KpiCard label="MRR realizado" value={fmtR$(totals.mrrReal)} sub="Visão de caixa × % de administração"
             pillLabel={totals.gap >= 0 ? "acima do potencial" : "abaixo do potencial"} pillTone={totals.gap >= 0 ? "verde" : "ambar"} />
           <KpiCard label="Gap de faturamento" value={fmtR$(totals.gap)} sub="MRR realizado − faturamento potencial"
             pillLabel={totals.gap >= 0 ? "dentro da meta" : "atenção"} pillTone={totals.gap >= 0 ? "verde" : "vermelho"} />
@@ -349,7 +360,7 @@ function DashboardView({ rows, onOpenUsina }) {
             pillLabel={totals.inad > 0 ? "acima do limite" : "sem inadimplência"} pillTone={totals.inad > 0 ? "vermelho" : "verde"} />
           <KpiCard label="Capturas pendentes" value={totals.capturas} sub="UCs do rateio sem fatura na competência"
             pillLabel={totals.capturas > 0 ? "abrir chamados" : "tudo capturado"} pillTone={totals.capturas > 0 ? "vermelho" : "verde"} />
-          <KpiCard label="Chamados abertos" value={totals.chamadosAbertos} sub="Abertos ou em andamento no HubSpot"
+          <KpiCard label="Chamados abertos" value={totals.chamadosAbertos} sub="Abertos ou em andamento"
             pillLabel={totals.chamadosAbertos > 0 ? "acompanhar" : "sem pendências"} pillTone={totals.chamadosAbertos > 0 ? "ambar" : "verde"} />
         </div>
       </div>
@@ -361,16 +372,16 @@ function DashboardView({ rows, onOpenUsina }) {
         <Table>
           <thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>Usina</Th><Th>Health score</Th><Th>Status</Th><Th>Efic. rateio</Th><Th>Vacância</Th><Th>Capturas pend.</Th><Th>Inad. mês</Th><Th>Diagnóstico</Th></tr></thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.u.id} className="border-b last:border-0 align-top cursor-pointer hover:bg-[#FAFAFB]" style={{ borderColor: "#F1F2F4" }} onClick={() => onOpenUsina(r.u.id)}>
-                <Td className="max-w-[220px] text-[#161821]">{r.u.nome}</Td>
-                <Td className="tabular-nums">{r.score.toFixed(0)}</Td>
+            {dashboard.usinas.map((r) => (
+              <tr key={r.usina_id} className="border-b last:border-0 align-top cursor-pointer hover:bg-[#FAFAFB]" style={{ borderColor: "#F1F2F4" }} onClick={() => onOpenUsina(r.usina_id)}>
+                <Td className="max-w-[220px] text-[#161821]">{r.nome}</Td>
+                <Td className="tabular-nums">{r.health_score.toFixed(0)}</Td>
                 <Td><StatusPill status={r.status} /></Td>
-                <Td className="tabular-nums">{(r.u.eficienciaRateio * 100).toFixed(0)}%</Td>
-                <Td className="tabular-nums">{(r.u.vacancia * 100).toFixed(0)}%</Td>
-                <Td className="tabular-nums">{r.u.capturasPendentes}</Td>
-                <Td className="tabular-nums">{fmtR$(r.u.inadimplenciaMes)}</Td>
-                <Td className="max-w-[300px]" style={{ color: T.textMuted }}>{r.diag}</Td>
+                <Td className="tabular-nums">{(r.eficiencia_rateio * 100).toFixed(0)}%</Td>
+                <Td className="tabular-nums">{(r.vacancia * 100).toFixed(0)}%</Td>
+                <Td className="tabular-nums">{r.capturas_pendentes}</Td>
+                <Td className="tabular-nums">{fmtR$(r.inadimplencia_mes)}</Td>
+                <Td className="max-w-[300px]" style={{ color: T.textMuted }}>{r.diagnostico}</Td>
               </tr>
             ))}
           </tbody>
@@ -381,7 +392,9 @@ function DashboardView({ rows, onOpenUsina }) {
 }
 
 // ================= ROTINA / ALERTAS =================
-function RotinaView({ alerts }) {
+function RotinaView({ alerts, usinasMeta, ucsMeta }) {
+  const nomeUsina = (id) => usinasMeta.find((u) => u.id === id)?.nome || `Usina #${id}`;
+  const numeroUc = (id) => id ? (ucsMeta.find((u) => u.id === id)?.numero) : null;
   const groups = ["critico", "atencao", "medio", "info"];
   const counts = Object.fromEntries(groups.map((g) => [g, alerts.filter((a) => a.prioridade === g).length]));
   return (
@@ -396,20 +409,23 @@ function RotinaView({ alerts }) {
             <div className="flex flex-col items-center pt-1"><PriorityDot p={a.prioridade} /><span className="text-[11px] mt-1" style={{ color: T.textMuted }}>#{i + 1}</span></div>
             <div className="flex-1">
               <div className="flex items-baseline gap-2 flex-wrap">
-                <span className="text-[13px] text-[#161821]">{a.usina}</span>
-                {a.uc && <span className="text-[12px]" style={{ color: T.textMuted }}>UC {a.uc}</span>}
+                <span className="text-[13px] text-[#161821]">{nomeUsina(a.usina_id)}</span>
+                {numeroUc(a.uc_id) && <span className="text-[12px]" style={{ color: T.textMuted }}>UC {numeroUc(a.uc_id)}</span>}
                 <Pill>{a.categoria}</Pill>
               </div>
-              <p className="text-[13px] text-[#33353C] mt-1">{a.problema}</p>
-              <p className="text-[12.5px] mt-1" style={{ color: PRIORITY_META[a.prioridade].text }}>Ação: {a.acao}</p>
+              <p className="text-[13px] text-[#33353C] mt-1">{a.problema_identificado}</p>
+              <p className="text-[12.5px] mt-1" style={{ color: PRIORITY_META[a.prioridade].text }}>Ação: {a.acao_recomendada}</p>
             </div>
           </div>
         ))}
+        {alerts.length === 0 && <EmptyRow texto="Nenhum alerta para esta competência. 🎉" />}
       </div>
     </div>
   );
 }
-function AlertasView({ alerts }) {
+function AlertasView({ alerts, usinasMeta, ucsMeta }) {
+  const nomeUsina = (id) => usinasMeta.find((u) => u.id === id)?.nome || `Usina #${id}`;
+  const numeroUc = (id) => id ? (ucsMeta.find((u) => u.id === id)?.numero) : null;
   const [fc, setFc] = useState("Todas"); const [fp, setFp] = useState("Todas");
   const categorias = ["Todas", ...Array.from(new Set(alerts.map((a) => a.categoria)))];
   const filtered = alerts.filter((a) => (fc === "Todas" || a.categoria === fc) && (fp === "Todas" || a.prioridade === fp));
@@ -427,10 +443,10 @@ function AlertasView({ alerts }) {
           {filtered.map((a) => (
             <tr key={a.id} className="border-b last:border-0 align-top" style={{ borderColor: "#F1F2F4" }}>
               <Td><div className="flex items-center gap-2"><PriorityDot p={a.prioridade} />{PRIORITY_META[a.prioridade].label}</div></Td>
-              <Td>{a.categoria}</Td><Td>{a.usina}{a.uc ? ` · UC ${a.uc}` : ""}</Td>
-              <Td className="max-w-[260px] text-[#33353C]">{a.problema}</Td>
-              <Td className="tabular-nums" style={{ color: T.textMuted }}>{a.valorAtual} → {a.valorEsperado}</Td>
-              <Td className="text-[#33353C]">{a.acao}</Td>
+              <Td>{a.categoria}</Td><Td>{nomeUsina(a.usina_id)}{numeroUc(a.uc_id) ? ` · UC ${numeroUc(a.uc_id)}` : ""}</Td>
+              <Td className="max-w-[260px] text-[#33353C]">{a.problema_identificado}</Td>
+              <Td className="tabular-nums" style={{ color: T.textMuted }}>{a.valor_atual} → {a.valor_esperado}</Td>
+              <Td className="text-[#33353C]">{a.acao_recomendada}</Td>
               <Td><Pill>{a.status}</Pill></Td>
             </tr>
           ))}
@@ -441,68 +457,57 @@ function AlertasView({ alerts }) {
 }
 
 // ================= USINAS =================
-function UsinasListView({ onOpen }) {
+function UsinasListView({ usinasMeta, onOpen }) {
   return (
     <Table>
       <thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>Usina</Th><Th>Distribuidora</Th><Th>UF</Th><Th>UC âncora</Th><Th>GD</Th><Th>Modalidade</Th><Th>% Admin</Th><Th>Desconto</Th><Th>Status</Th><Th>Responsável</Th></tr></thead>
       <tbody>
-        {USINAS.map((u) => (
+        {usinasMeta.map((u) => (
           <tr key={u.id} className="border-b last:border-0 cursor-pointer hover:bg-[#FAFAFB]" style={{ borderColor: "#F1F2F4" }} onClick={() => onOpen(u.id)}>
-            <Td className="text-[#161821]">{u.nome}</Td><Td>{u.distribuidora}</Td><Td>{u.uf}</Td><Td>{u.ucAncora}</Td>
-            <Td>GD{u.gd}</Td><Td>{u.modalidade}</Td><Td className="tabular-nums">{(u.pctAdmin * 100).toFixed(0)}%</Td>
-            <Td className="tabular-nums">{(u.desconto * 100).toFixed(0)}%</Td><Td>{u.status}</Td><Td>{u.responsavel}</Td>
+            <Td className="text-[#161821]">{u.nome}</Td><Td>{u.distribuidora}</Td><Td>{u.uf}</Td><Td>{u.uc_ancora_numero || "—"}</Td>
+            <Td>GD{u.gd}</Td><Td>{u.modalidade}</Td><Td className="tabular-nums">{(u.pct_administracao * 100).toFixed(0)}%</Td>
+            <Td className="tabular-nums">{(u.desconto_cliente * 100).toFixed(0)}%</Td><Td>{u.status}</Td><Td>{u.responsavel || "—"}</Td>
           </tr>
         ))}
       </tbody>
     </Table>
   );
 }
-function UsinaDetailView({ usinaId, onBack }) {
-  const u = USINAS.find((x) => x.id === usinaId);
-  const ucs = UCS.filter((x) => x.usinaId === usinaId);
-  const score = healthScore(u); const status = statusFromScore(score);
-  const serie = GERACAO[usinaId];
+function UsinaDetailView({ usinaId, usinasMeta, indicadores, ucsMeta, onBack }) {
+  const meta = usinasMeta.find((x) => x.id === usinaId);
+  const ind = indicadores.find((x) => x.usina_id === usinaId);
+  const ucs = ucsMeta.filter((x) => x.usina_id === usinaId);
+  if (!meta || !ind) return <EmptyRow texto="Sem dados para esta usina nesta competência." />;
   return (
     <div className="flex flex-col gap-6">
       <button onClick={onBack} className="flex items-center gap-1.5 text-[13px] w-fit" style={{ color: T.textMuted }}><ChevronLeft size={14} /> Voltar para Usinas</button>
       <div className="flex items-start justify-between flex-wrap gap-3">
-        <div><h2 className="text-[17px] text-[#161821]">{u.nome}</h2><p className="text-[13px] mt-1" style={{ color: T.textMuted }}>{u.distribuidora} · {u.uf} · GD{u.gd} · {u.modalidade}</p></div>
-        <StatusPill status={status} />
+        <div><h2 className="text-[17px] text-[#161821]">{meta.nome}</h2><p className="text-[13px] mt-1" style={{ color: T.textMuted }}>{meta.distribuidora} · {meta.uf} · GD{meta.gd} · {meta.modalidade}</p></div>
+        <StatusPill status={ind.status} />
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <KpiCard label="Health score" value={score.toFixed(0)} />
-        <KpiCard label="Eficiência de rateio" value={`${(u.eficienciaRateio * 100).toFixed(0)}%`} />
-        <KpiCard label="Vacância" value={`${(u.vacancia * 100).toFixed(0)}%`} />
-        <KpiCard label="Saldo acumulado UCs" value={fmtKwh(u.saldoAcumuladoUCs)} />
-        <KpiCard label="Inadimplência do mês" value={fmtR$(u.inadimplenciaMes)} pillLabel={u.inadimplenciaMes > 0 ? "acima do limite" : "em dia"} pillTone={u.inadimplenciaMes > 0 ? "vermelho" : "verde"} />
-        <KpiCard label="Faturamento bruto" value={fmtR$(u.faturamentoBrutoRealizado)} />
-        <KpiCard label="Chamados abertos" value={u.chamadosAbertos} />
-        <KpiCard label="Capturas pendentes" value={u.capturasPendentes} pillLabel={u.capturasPendentes > 0 ? "abrir chamados" : "ok"} pillTone={u.capturasPendentes > 0 ? "vermelho" : "verde"} />
+        <KpiCard label="Health score" value={ind.health_score.toFixed(0)} />
+        <KpiCard label="Eficiência de rateio" value={`${(ind.eficiencia_rateio * 100).toFixed(0)}%`} />
+        <KpiCard label="Vacância" value={`${(ind.vacancia * 100).toFixed(0)}%`} />
+        <KpiCard label="Saldo acumulado UCs" value={fmtKwh(ind.saldo_acumulado_kwh)} />
+        <KpiCard label="Inadimplência do mês" value={fmtR$(ind.inadimplencia_mes)} pillLabel={ind.inadimplencia_mes > 0 ? "acima do limite" : "em dia"} pillTone={ind.inadimplencia_mes > 0 ? "vermelho" : "verde"} />
+        <KpiCard label="Faturamento bruto" value={fmtR$(ind.faturamento_bruto_realizado)} />
+        <KpiCard label="Chamados abertos" value={ind.chamados_abertos} />
+        <KpiCard label="Capturas pendentes" value={ind.capturas_pendentes} pillLabel={ind.capturas_pendentes > 0 ? "abrir chamados" : "ok"} pillTone={ind.capturas_pendentes > 0 ? "vermelho" : "verde"} />
       </div>
       <div>
-        <h3 className="text-[14px] text-[#161821] mb-3">Geração injetada — últimos 6 meses</h3>
-        <div className="bg-white border rounded-xl px-4 py-4" style={{ borderColor: T.border, height: 240 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={serie}>
-              <CartesianGrid stroke="#F1F2F4" vertical={false} />
-              <XAxis dataKey="comp" tick={{ fontSize: 12, fill: T.textMuted }} axisLine={{ stroke: T.border }} tickLine={false} />
-              <YAxis tick={{ fontSize: 12, fill: T.textMuted }} axisLine={false} tickLine={false} />
-              <Tooltip formatter={(v) => fmtKwh(v)} />
-              <Line type="monotone" dataKey="injetada" stroke={T.accent} strokeWidth={2} dot={{ r: 3 }} name="Energia injetada" />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
+        <h3 className="text-[14px] text-[#161821] mb-3">Diagnóstico</h3>
+        <div className="bg-white border rounded-xl px-5 py-4 text-[13px]" style={{ borderColor: T.border, color: "#33353C" }}>{ind.diagnostico}</div>
       </div>
       <div>
         <h3 className="text-[14px] text-[#161821] mb-3">UCs do rateio ({ucs.length})</h3>
         <Table>
-          <thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>UC</Th><Th>Apelido</Th><Th>Rateio verificado</Th><Th>Saldo</Th><Th>Autonomia</Th><Th>Sinalização de saldo</Th></tr></thead>
+          <thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>UC</Th><Th>Apelido</Th><Th>Rateio verificado</Th><Th>Saldo</Th><Th>Autonomia</Th></tr></thead>
           <tbody>{ucs.map((uc) => (
             <tr key={uc.id} className="border-b last:border-0" style={{ borderColor: "#F1F2F4" }}>
               <Td className="tabular-nums">{uc.numero}</Td><Td>{uc.apelido}</Td>
-              <Td className="tabular-nums">{(uc.rateioVerificado * 100).toFixed(1)}%</Td>
-              <Td className="tabular-nums">{fmtKwh(uc.saldoKwh)}</Td><Td className="tabular-nums">{uc.autonomiaMeses.toFixed(1)} meses</Td>
-              <Td><SinalTag texto={ucSaldoAlerta(uc)} /></Td>
+              <Td className="tabular-nums">{uc.rateio_verificado_pct != null ? `${(uc.rateio_verificado_pct * 100).toFixed(1)}%` : "—"}</Td>
+              <Td className="tabular-nums">{fmtKwh(uc.saldo_kwh)}</Td><Td className="tabular-nums">{uc.autonomia_meses.toFixed(1)} meses</Td>
             </tr>
           ))}</tbody>
         </Table>
@@ -512,58 +517,38 @@ function UsinaDetailView({ usinaId, onBack }) {
 }
 
 // ================= UCs =================
-function UCsListView({ onOpen }) {
+function UCsListView({ ucsMeta, onOpen }) {
   return (
     <Table>
-      <thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>UC</Th><Th>Apelido</Th><Th>Usina</Th><Th>Consumo médio</Th><Th>Saldo</Th><Th>Autonomia</Th><Th>Sinalização</Th></tr></thead>
+      <thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>UC</Th><Th>Apelido</Th><Th>Usina</Th><Th>Consumo médio</Th><Th>Saldo</Th><Th>Autonomia</Th></tr></thead>
       <tbody>
-        {UCS.map((uc) => {
-          const usina = USINAS.find((u) => u.id === uc.usinaId);
-          return (
-            <tr key={uc.id} className="border-b last:border-0 cursor-pointer hover:bg-[#FAFAFB]" style={{ borderColor: "#F1F2F4" }} onClick={() => onOpen(uc.id)}>
-              <Td className="tabular-nums">{uc.numero}</Td><Td>{uc.apelido}</Td><Td className="max-w-[220px]">{usina.nome}</Td>
-              <Td className="tabular-nums">{fmtKwh(uc.consumoCompensavel)}</Td><Td className="tabular-nums">{fmtKwh(uc.saldoKwh)}</Td>
-              <Td className="tabular-nums">{uc.autonomiaMeses.toFixed(1)} meses</Td><Td><SinalTag texto={ucSaldoAlerta(uc)} /></Td>
-            </tr>
-          );
-        })}
+        {ucsMeta.map((uc) => (
+          <tr key={uc.id} className="border-b last:border-0 cursor-pointer hover:bg-[#FAFAFB]" style={{ borderColor: "#F1F2F4" }} onClick={() => onOpen(uc.id)}>
+            <Td className="tabular-nums">{uc.numero}</Td><Td>{uc.apelido}</Td><Td className="max-w-[220px]">{uc.usina_nome}</Td>
+            <Td className="tabular-nums">{fmtKwh(uc.consumo_compensavel_kwh)}</Td><Td className="tabular-nums">{fmtKwh(uc.saldo_kwh)}</Td>
+            <Td className="tabular-nums">{uc.autonomia_meses.toFixed(1)} meses</Td>
+          </tr>
+        ))}
+        {ucsMeta.length === 0 && <tr><Td className="text-center" style={{ color: T.textMuted }}>Nenhuma UC importada ainda.</Td></tr>}
       </tbody>
     </Table>
   );
 }
-function UCDetailView({ ucId, onBack }) {
-  const uc = UCS.find((x) => x.id === ucId);
-  const usina = USINAS.find((u) => u.id === uc.usinaId);
+function UCDetailView({ ucId, ucsMeta, onBack }) {
+  const uc = ucsMeta.find((x) => x.id === ucId);
+  if (!uc) return <EmptyRow texto="UC não encontrada." />;
   return (
     <div className="flex flex-col gap-6">
       <button onClick={onBack} className="flex items-center gap-1.5 text-[13px] w-fit" style={{ color: T.textMuted }}><ChevronLeft size={14} /> Voltar para UCs</button>
-      <div><h2 className="text-[17px] text-[#161821]">UC {uc.numero} · {uc.apelido}</h2><p className="text-[13px] mt-1" style={{ color: T.textMuted }}>{usina.nome} · CNPJ {uc.cnpj}</p></div>
+      <div><h2 className="text-[17px] text-[#161821]">UC {uc.numero} · {uc.apelido}</h2><p className="text-[13px] mt-1" style={{ color: T.textMuted }}>{uc.usina_nome}</p></div>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-        <KpiCard label="Consumo compensável" value={fmtKwh(uc.consumoCompensavel)} />
-        <KpiCard label="Saldo atual" value={fmtKwh(uc.saldoKwh)} />
-        <KpiCard label="Autonomia" value={`${uc.autonomiaMeses.toFixed(1)} meses`} />
-        <KpiCard label="Rateio ideal" value={`${(uc.rateioIdeal * 100).toFixed(1)}%`} />
-        <KpiCard label="Rateio verificado" value={`${(uc.rateioVerificado * 100).toFixed(1)}%`} />
-        <KpiCard label="Déficit mensal" value={fmtKwh(uc.deficitMensal)} pillLabel={uc.deficitMensal < 0 ? "abaixo do ideal" : "ok"} pillTone={uc.deficitMensal < 0 ? "ambar" : "verde"} />
+        <KpiCard label="Consumo compensável" value={fmtKwh(uc.consumo_compensavel_kwh)} />
+        <KpiCard label="Saldo atual" value={fmtKwh(uc.saldo_kwh)} />
+        <KpiCard label="Autonomia" value={`${uc.autonomia_meses.toFixed(1)} meses`} />
+        <KpiCard label="Rateio ideal" value={uc.rateio_ideal_pct != null ? `${(uc.rateio_ideal_pct * 100).toFixed(1)}%` : "—"} />
+        <KpiCard label="Rateio verificado" value={uc.rateio_verificado_pct != null ? `${(uc.rateio_verificado_pct * 100).toFixed(1)}%` : "—"} />
       </div>
-      <div>
-        <h3 className="text-[14px] text-[#161821] mb-3">Créditos utilizados — últimos 3 meses</h3>
-        <div className="bg-white border rounded-xl px-4 py-4" style={{ borderColor: T.border, height: 220 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={[{ m: "N-2", v: uc.creditosN2 }, { m: "N-1", v: uc.creditosN1 }, { m: "N", v: uc.creditosN }]}>
-              <CartesianGrid stroke="#F1F2F4" vertical={false} />
-              <XAxis dataKey="m" tick={{ fontSize: 12, fill: T.textMuted }} axisLine={{ stroke: T.border }} tickLine={false} />
-              <YAxis tick={{ fontSize: 12, fill: T.textMuted }} axisLine={false} tickLine={false} />
-              <Tooltip formatter={(v) => fmtKwh(v)} />
-              <Bar dataKey="v" fill="#3D6E8C" radius={[3, 3, 0, 0]} name="Créditos utilizados" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-      <div className="flex flex-col gap-2">
-        <h3 className="text-[14px] text-[#161821]">Sinalizações</h3>
-        <div className="flex gap-2 flex-wrap"><SinalTag texto={ucSaldoAlerta(uc)} /><SinalTag texto={ucConsumoAlerta(uc)} /><SinalTag texto={ucInadimplenciaAlerta(uc)} /></div>
-      </div>
+      <MockBanner>O histórico de créditos utilizados (últimos 3 meses) ainda não tem um endpoint próprio no backend — próxima extensão natural da API.</MockBanner>
     </div>
   );
 }
@@ -575,6 +560,7 @@ function RateioView() {
   const inadimplentes = UCS.filter((uc) => uc.diasVencido > PARAMS.inadimplenciaCriticaDias);
   return (
     <div className="flex flex-col gap-8">
+      <MockBanner />
       <div>
         <SectionTitle>Rateio — todas as UCs</SectionTitle>
         <Table>
@@ -625,6 +611,7 @@ function RateioView() {
 function GeracaoView() {
   return (
     <div className="flex flex-col gap-10">
+      <MockBanner />
       {USINAS.map((u) => {
         const serie = GERACAO[u.id];
         const { desvio, tendencia, media } = tendenciaGeracao(serie);
@@ -684,6 +671,7 @@ function FaturamentoView() {
   const totalPerdido = pendentes.reduce((s, p) => s + p.perdido, 0);
   return (
     <div className="flex flex-col gap-6">
+      <MockBanner />
       <div className="grid grid-cols-2 gap-4 max-w-xl">
         <KpiCard label="UCs sem captura" value={pendentes.length} pillLabel={pendentes.length > 0 ? "abrir chamados" : "tudo capturado"} pillTone={pendentes.length > 0 ? "vermelho" : "verde"} />
         <KpiCard label="Faturamento potencial perdido" value={fmtR$(totalPerdido)} pillLabel={totalPerdido > 0 ? "impacto no mês" : "sem perdas"} pillTone={totalPerdido > 0 ? "vermelho" : "verde"} />
@@ -713,6 +701,7 @@ function InadimplenciaView() {
   const totalVencido = vencidas.reduce((s, uc) => s + (uc.unificada ? valorRealAPagar(uc) : uc.valorVencido), 0);
   return (
     <div className="flex flex-col gap-6">
+      <MockBanner />
       <div className="grid grid-cols-3 gap-4 max-w-2xl">
         <KpiCard label="UCs em atraso" value={vencidas.length} pillLabel={vencidas.length > 0 ? "acompanhar" : "em dia"} pillTone={vencidas.length > 0 ? "vermelho" : "verde"} />
         <KpiCard label="Total em aberto" value={fmtR$(totalVencido)} />
@@ -742,17 +731,17 @@ function InadimplenciaView() {
 }
 
 // ================= TARIFAS =================
-function TarifasView() {
+function TarifasView({ tarifas }) {
   return (
     <div className="flex flex-col gap-4">
       <SectionTitle sub="Tarifa de retorno usada no cálculo do faturamento potencial (MRR). Alterações geram novo registro — histórico nunca é sobrescrito.">Tarifas por distribuidora</SectionTitle>
       <Table>
         <thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>Distribuidora</Th><Th>UF</Th><Th>Tarifa fornecida</Th><Th>Injetada GD1</Th><Th>Injetada GD2</Th><Th>Autoconsumo GD1</Th><Th>Autoconsumo GD2</Th></tr></thead>
-        <tbody>{TARIFAS.map((t) => (
+        <tbody>{tarifas.map((t) => (
           <tr key={t.distribuidora} className="border-b last:border-0" style={{ borderColor: "#F1F2F4" }}>
             <Td>{t.distribuidora}</Td><Td>{t.uf}</Td>
-            <Td className="tabular-nums">R$ {t.fornecida.toFixed(4)}</Td><Td className="tabular-nums">R$ {t.gd1.toFixed(4)}</Td>
-            <Td className="tabular-nums">R$ {t.gd2.toFixed(4)}</Td><Td className="tabular-nums">R$ {t.autoGd1.toFixed(4)}</Td><Td className="tabular-nums">R$ {t.autoGd2.toFixed(4)}</Td>
+            <Td className="tabular-nums">R$ {t.tarifa_fornecida.toFixed(4)}</Td><Td className="tabular-nums">R$ {t.tarifa_injetada_gd1.toFixed(4)}</Td>
+            <Td className="tabular-nums">R$ {t.tarifa_injetada_gd2.toFixed(4)}</Td><Td className="tabular-nums">R$ {t.tarifa_injetada_autoconsumo_gd1.toFixed(4)}</Td><Td className="tabular-nums">R$ {t.tarifa_injetada_autoconsumo_gd2.toFixed(4)}</Td>
           </tr>
         ))}</tbody>
       </Table>
@@ -761,10 +750,10 @@ function TarifasView() {
 }
 
 // ================= CHAMADOS =================
-function ChamadosView() {
+function ChamadosView({ chamados }) {
   const [status, setStatus] = useState("Todos");
   const opts = ["Todos", "Aberto", "Em andamento", "Aguardando retorno", "Resolvido", "Encerrado"];
-  const filtered = CHAMADOS_SEED.filter((c) => status === "Todos" || c.status === status);
+  const filtered = chamados.filter((c) => status === "Todos" || c.status === status);
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-3">
@@ -773,17 +762,16 @@ function ChamadosView() {
         <span className="text-[12px]" style={{ color: T.textMuted }}>{filtered.length} chamado(s)</span>
       </div>
       <Table>
-        <thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>ID</Th><Th>Usina</Th><Th>Tipo</Th><Th>Descrição</Th><Th>UC(s)</Th><Th>Abertura</Th><Th>Impacto MRR</Th><Th>Status</Th></tr></thead>
-        <tbody>{filtered.map((c) => {
-          const usina = USINAS.find((u) => u.id === c.usinaId);
-          return (
-            <tr key={c.id} className="border-b last:border-0" style={{ borderColor: "#F1F2F4" }}>
-              <Td className="tabular-nums">{c.id}</Td><Td className="max-w-[160px]">{usina.nome}</Td><Td>{c.tipo}</Td>
-              <Td className="max-w-[240px] text-[#33353C]">{c.descricao}</Td><Td className="tabular-nums">{c.ucs}</Td>
-              <Td>{c.dataAbertura}</Td><Td className="tabular-nums">{fmtR$(c.impactoMrr)}</Td><Td><ChamadoPill status={c.status} /></Td>
-            </tr>
-          );
-        })}</tbody>
+        <thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>ID</Th><Th>Usina</Th><Th>Tipo</Th><Th>Descrição</Th><Th>Qtd. UCs</Th><Th>Abertura</Th><Th>Impacto MRR</Th><Th>Status</Th></tr></thead>
+        <tbody>{filtered.map((c) => (
+          <tr key={c.id} className="border-b last:border-0" style={{ borderColor: "#F1F2F4" }}>
+            <Td className="tabular-nums">{c.id}</Td><Td className="max-w-[160px]">{c.usina_nome}</Td><Td>{c.tipo}</Td>
+            <Td className="max-w-[240px] text-[#33353C]">{c.descricao}</Td><Td className="tabular-nums">{c.qtd_ucs}</Td>
+            <Td>{c.data_abertura || "—"}</Td><Td className="tabular-nums">{fmtR$(c.impacto_mrr)}</Td><Td><ChamadoPill status={c.status} /></Td>
+          </tr>
+        ))}
+        {filtered.length === 0 && <tr><Td className="text-center" style={{ color: T.textMuted }}>Nenhum chamado registrado ainda.</Td></tr>}
+        </tbody>
       </Table>
     </div>
   );
@@ -793,6 +781,7 @@ function ChamadosView() {
 function AuditoriasView() {
   return (
     <div className="flex flex-col gap-6">
+      <MockBanner />
       <SectionTitle sub="Snapshot mensal da usina AAMN – UFV 1, competência a competência (dados reais em 07/2026)">Auditorias — evolução mensal</SectionTitle>
       <div className="bg-white border rounded-xl px-4 py-4" style={{ borderColor: T.border, height: 240 }}>
         <ResponsiveContainer width="100%" height="100%">
@@ -822,6 +811,7 @@ function AuditoriasView() {
 function HistoricoView() {
   return (
     <div className="flex flex-col gap-3">
+      <MockBanner />
       <SectionTitle sub="Linha do tempo consolidada — alertas resolvidos, auditorias e chamados encerrados">Histórico</SectionTitle>
       {HISTORICO.map((h, i) => (
         <div key={i} className="flex gap-4 bg-white border rounded-xl px-5 py-4" style={{ borderColor: T.border }}>
@@ -837,42 +827,57 @@ function HistoricoView() {
 }
 
 // ================= IMPORTAÇÃO =================
-function ImportacaoView() {
-  const [step, setStep] = useState(1);
-  const fontes = [
-    { nome: "RATEIO", desc: "Configuração de usinas e lista de UCs do rateio atual (a mesma aba que a operação usa hoje)" },
-    { nome: "EXTRATO_DETALHADO", desc: "Extrato de faturamento por UC × competência" },
-    { nome: "GERACAO", desc: "Geração mensal por usina (export OPS)" },
-    { nome: "CHAMADOS", desc: "Atualização manual semanal (sem API HubSpot)" },
-    { nome: "TARIFAS", desc: "Cadastro de tarifas por distribuidora" },
-  ];
+function ImportacaoView({ competencia, onImported }) {
+  const [file, setFile] = useState(null);
+  const [status, setStatus] = useState("idle"); // idle | uploading | recalculando | done | error
+  const [resultado, setResultado] = useState(null);
+  const [erro, setErro] = useState(null);
+
+  async function handleImportar() {
+    if (!file) return;
+    setStatus("uploading"); setErro(null);
+    try {
+      const r = await api.postImportar(file);
+      setResultado(r);
+      setStatus("recalculando");
+      await api.postRecalcular(competencia);
+      setStatus("done");
+      onImported();
+    } catch (e) {
+      setErro(e);
+      setStatus("error");
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
-      <SectionTitle sub="Importação nunca apaga histórico — dados novos são adicionados/atualizados por chave (UC+competência, usina+competência, ID do chamado)">Importar dados</SectionTitle>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {fontes.map((f) => (
-          <div key={f.nome} className="bg-white border rounded-xl px-5 py-4 flex flex-col gap-2" style={{ borderColor: T.border }}>
-            <div className="flex items-center gap-2 text-[13px] text-[#161821]"><UploadCloud size={14} /> {f.nome}</div>
-            <p className="text-[12px]" style={{ color: T.textMuted }}>{f.desc}</p>
-            <button onClick={() => setStep(2)} className="text-[12px] px-2.5 py-1.5 rounded-lg border w-fit" style={{ borderColor: T.border }}>Selecionar arquivo (.xlsx/.csv)</button>
-          </div>
-        ))}
-      </div>
-      {step === 2 && (
-        <div className="bg-white border rounded-xl px-5 py-5 flex flex-col gap-3" style={{ borderColor: T.border }}>
-          <div className="flex items-center gap-2 text-[13px] text-[#161821]"><CheckCircle2 size={14} style={{ color: "#1F7A43" }} /> Pré-visualização do mapeamento de colunas</div>
-          <p className="text-[12px]" style={{ color: T.textMuted }}>As colunas do arquivo foram reconhecidas automaticamente. Confirme antes de importar.</p>
-          <Table>
-            <thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>Coluna do arquivo</Th><Th>Campo do sistema</Th><Th>Status</Th></tr></thead>
-            <tbody>
-              {[["Número da UC", "uc.numero", "OK"], ["Competência", "fatura.competencia", "OK"], ["Créditos Utilizados", "fatura.creditosUtilizadosKwh", "OK"], ["Status de Pagamento", "fatura.statusPagamento", "Revisar 2 linhas"]].map((r) => (
-                <tr key={r[0]} className="border-b last:border-0" style={{ borderColor: "#F1F2F4" }}><Td>{r[0]}</Td><Td className="tabular-nums">{r[1]}</Td><Td>{r[2] === "OK" ? <SinalTag texto="OK" /> : <SinalTag texto={r[2]} />}</Td></tr>
-              ))}
-            </tbody>
-          </Table>
-          <button className="text-[12px] px-3 py-2 rounded-lg text-white w-fit" style={{ background: T.ink }}>Confirmar importação</button>
+      <SectionTitle sub="Envie o mesmo arquivo .xlsx que a operação usa hoje (abas RATEIO, GERACAO, TARIFAS, EXTRATO_DETALHADO, CHAMADOS). Nunca apaga histórico — dados novos são adicionados/atualizados por chave.">Importar dados</SectionTitle>
+
+      <div className="bg-white border rounded-xl px-5 py-5 flex flex-col gap-4" style={{ borderColor: T.border }}>
+        <div className="flex items-center gap-3 flex-wrap">
+          <input type="file" accept=".xlsx" onChange={(e) => setFile(e.target.files?.[0] || null)}
+            className="text-[13px]" />
+          <button onClick={handleImportar} disabled={!file || status === "uploading" || status === "recalculando"}
+            className="text-[12px] px-3 py-2 rounded-lg text-white disabled:opacity-40" style={{ background: T.ink }}>
+            {status === "uploading" ? "Enviando arquivo..." : status === "recalculando" ? "Recalculando indicadores..." : "Importar e recalcular"}
+          </button>
         </div>
-      )}
+
+        {status === "done" && resultado && (
+          <div className="flex flex-col gap-2 text-[13px]">
+            <div className="flex items-center gap-2" style={{ color: "#1F7A43" }}><CheckCircle2 size={14} /> Importação concluída para a competência {competencia.slice(0, 7)}.</div>
+            <Table>
+              <thead><tr className="text-left border-b" style={{ color: T.textMuted, borderColor: T.border, background: "#FAFAFB" }}><Th>Fonte</Th><Th>Resultado</Th></tr></thead>
+              <tbody>
+                {Object.entries(resultado).map(([k, v]) => (
+                  <tr key={k} className="border-b last:border-0" style={{ borderColor: "#F1F2F4" }}><Td>{k}</Td><Td className="text-[#33353C]">{JSON.stringify(v)}</Td></tr>
+                ))}
+              </tbody>
+            </Table>
+          </div>
+        )}
+        {status === "error" && <ErrorBlock error={erro} />}
+      </div>
     </div>
   );
 }
@@ -882,8 +887,39 @@ export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [openUsina, setOpenUsina] = useState(null);
   const [openUC, setOpenUC] = useState(null);
-  const rows = useMemo(() => USINAS.map((u) => ({ u, score: healthScore(u), status: statusFromScore(healthScore(u)), diag: diagnostico(u) })), []);
-  const alerts = useMemo(() => buildAlerts(), []);
+  const [competencia, setCompetencia] = useState("2026-07-01");
+
+  const [dashboard, setDashboard] = useState(null);
+  const [alerts, setAlerts] = useState([]);
+  const [usinasMeta, setUsinasMeta] = useState([]);
+  const [ucsMeta, setUcsMeta] = useState([]);
+  const [chamados, setChamados] = useState([]);
+  const [tarifas, setTarifas] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelado = false;
+    async function carregar() {
+      setLoading(true); setError(null);
+      try {
+        await api.postRecalcular(competencia);
+        const [dash, al, um, uc, ch, tf] = await Promise.all([
+          api.getDashboard(competencia), api.getAlertas(competencia),
+          api.getUsinas(), api.getUcs(), api.getChamados(), api.getTarifas(),
+        ]);
+        if (cancelado) return;
+        setDashboard(dash); setAlerts(al); setUsinasMeta(um); setUcsMeta(uc); setChamados(ch); setTarifas(tf);
+      } catch (e) {
+        if (!cancelado) setError(e);
+      } finally {
+        if (!cancelado) setLoading(false);
+      }
+    }
+    carregar();
+    return () => { cancelado = true; };
+  }, [competencia, reloadKey]);
 
   const nav = [
     { id: "dashboard", label: "Placar", icon: LayoutGrid, badge: "NOVO" },
@@ -905,20 +941,22 @@ export default function App() {
   function goTab(id) { setTab(id); setOpenUsina(null); setOpenUC(null); }
 
   let content;
-  if (tab === "dashboard") content = <DashboardView rows={rows} onOpenUsina={(id) => { setOpenUsina(id); setTab("usinas"); }} />;
-  else if (tab === "rotina") content = <RotinaView alerts={alerts} />;
-  else if (tab === "alertas") content = <AlertasView alerts={alerts} />;
-  else if (tab === "usinas") content = openUsina ? <UsinaDetailView usinaId={openUsina} onBack={() => setOpenUsina(null)} /> : <UsinasListView onOpen={setOpenUsina} />;
-  else if (tab === "ucs") content = openUC ? <UCDetailView ucId={openUC} onBack={() => setOpenUC(null)} /> : <UCsListView onOpen={setOpenUC} />;
+  if (loading) content = <LoadingBlock />;
+  else if (error) content = <ErrorBlock error={error} onRetry={() => setReloadKey((k) => k + 1)} />;
+  else if (tab === "dashboard") content = <DashboardView dashboard={dashboard} usinasMeta={usinasMeta} competencia={competencia} onChangeCompetencia={setCompetencia} onOpenUsina={(id) => { setOpenUsina(id); setTab("usinas"); }} />;
+  else if (tab === "rotina") content = <RotinaView alerts={alerts} usinasMeta={usinasMeta} ucsMeta={ucsMeta} />;
+  else if (tab === "alertas") content = <AlertasView alerts={alerts} usinasMeta={usinasMeta} ucsMeta={ucsMeta} />;
+  else if (tab === "usinas") content = openUsina ? <UsinaDetailView usinaId={openUsina} usinasMeta={usinasMeta} indicadores={dashboard.usinas} ucsMeta={ucsMeta} onBack={() => setOpenUsina(null)} /> : <UsinasListView usinasMeta={usinasMeta} onOpen={setOpenUsina} />;
+  else if (tab === "ucs") content = openUC ? <UCDetailView ucId={openUC} ucsMeta={ucsMeta} onBack={() => setOpenUC(null)} /> : <UCsListView ucsMeta={ucsMeta} onOpen={setOpenUC} />;
   else if (tab === "rateio") content = <RateioView />;
   else if (tab === "geracao") content = <GeracaoView />;
   else if (tab === "faturamento") content = <FaturamentoView />;
   else if (tab === "inadimplencia") content = <InadimplenciaView />;
-  else if (tab === "tarifas") content = <TarifasView />;
-  else if (tab === "chamados") content = <ChamadosView />;
+  else if (tab === "tarifas") content = <TarifasView tarifas={tarifas} />;
+  else if (tab === "chamados") content = <ChamadosView chamados={chamados} />;
   else if (tab === "auditorias") content = <AuditoriasView />;
   else if (tab === "historico") content = <HistoricoView />;
-  else if (tab === "importacao") content = <ImportacaoView />;
+  else if (tab === "importacao") content = <ImportacaoView competencia={competencia} onImported={() => setReloadKey((k) => k + 1)} />;
 
   return (
     <div className="min-h-screen w-full flex" style={{ background: T.bg, color: "#161821", fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif" }}>
